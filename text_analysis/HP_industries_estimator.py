@@ -10,13 +10,18 @@ import numpy as np
 from sklearn.cluster import KMeans
 from gensim.models import Word2Vec 
 from gensim.models.doc2vec import Doc2Vec , TaggedDocument
-
+import nltk
+ 
 class HP_industries_estimator:
 
     def __init__(self):
         pass
 
+    def train(self):
+        self.train_tfidf()
+        self.train_word2vec()
 
+        
     def train_tfidf(self):
         if self.train_documents is None:
             self.prepare_train_documents()
@@ -40,24 +45,59 @@ class HP_industries_estimator:
         self.tfidf_model = tfidf
 
 
+
+        
+    def train_word2vec(self):
+        if self.train_documents is None:
+            self.prepare_train_documents()
+
+        print("\t. Estimating Word2Vec model")            
+        
+        print("\t. Loading training documents")
+
+        counter = 0
+        all_docs = []
+        for train_doc in self.train_documents:
+
+            doc = train_doc[:150000] if len(train_doc) > 150000 else train_doc
+            if (counter%100) == 0:
+                print("{0} .. len: {1}".format(counter,len(doc)))
+
+            counter += 1
+            doc = remove_stopwords(doc)
+#            doc = re.sub(r'[^\w\s]','',doc)
+            doc_tokens =nltk.word_tokenize(doc.lower())
+            all_docs.append(doc_tokens)            
+
+        print("Creating all tagged documents")
+        documents = [TaggedDocument(doc, [i]) for i, doc in enumerate(all_docs)]    
+
+        print("\t. Run model")
+        model = Doc2Vec(documents = documents)
+        print("\t. Done")
+        self.word2vec_model = model
+    
     
 
     def store_model(self, path):
         print ("Storing tf idf model to {0}".format(path))
         pickle.dump(self.tfidf_model , open(path + ".model.pickle","wb"))
         self.website_info.to_pickle(path + ".website_info.pickle")
+        self.word2vec_model.save(path + ".word2vec.model")
+
 
 
     def load_model(self, path):
         print("\t.Loading from {0}".format(path))
         self.tfidf_model = pickle.load(open(path + ".model.pickle","rb"))
         self.website_info = pd.read_pickle(path + ".website_info.pickle")
+        self.word2vec_model = Word2Vec.load(path + ".word2vec.model")
 
 
 
 
     def estimate_industries(self):
-
+        ### TF IDF HP Industries: The approach by HP
         print("\t.Estimating linear kernel similarity")
         sim = linear_kernel(self.tfidf_model, self.tfidf_model)
         print("\t.Done")
@@ -66,10 +106,25 @@ class HP_industries_estimator:
         kmeans = KMeans(n_clusters = 300 , random_state = 12345).fit(sim)
         print("\t.Done")
 
-        pdb.set_trace()
         hp_industries =  kmeans.labels_
         print("\t. Updating website")
         self.website_info["hp_industry"] =  hp_industries
+
+
+        ### Word2Vec HP Industries: The approach by HP but using w2v similarity
+        print("\t.Initializing Word2Vec Matrices")
+        self.word2vec_model.init_sims()
+        print("\t.Estimating Word2Vec Similarity")
+        mat = self.word2vec_model.docvecs.doctag_syn0norm
+        w2v_sim = np.dot(mat, mat.T)
+        kmeans = KMeans(n_clusters = 300 , random_state = 12345).fit(w2v_sim)
+        print("\t.Done")
+
+        
+        hp_industries =  kmeans.labels_
+        print("\t. Updating website info")
+        self.website_info["w2v_hp_industry"] =  hp_industries
+        
             
 
 

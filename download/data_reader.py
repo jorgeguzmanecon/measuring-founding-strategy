@@ -1,6 +1,7 @@
 import pandas as pd
 import pdb
 import os, re
+import numpy as np
 
 class data_reader:
 
@@ -12,8 +13,27 @@ class data_reader:
         s = re.sub(r"http(s?)://(\w+)\.(\w+)\.(\w+)",r"\3.\4",s)
         return s
 
+
+
+    def add_closest_snapshot(companies, closest_snapshot_path="../../tfidf/closest_snapshots_list.dta"):
+        if not os.path.exists(closest_snapshot_path):
+            return companies
+
+        snaps = pd.read_stata(closest_snapshot_path)
+        snaps = snaps[['org_uuid','closest_snapshot','closest_snapshot_time']]
+        snaps['closest_snapshot_year'] = pd.to_numeric(snaps.closest_snapshot_time.str.slice(stop=4), errors='coerce', downcast='integer')
+
+        
+        companies =  companies.merge(snaps, how='left', on='org_uuid')
+        companies['snapshot_in_window'] = np.absolute(companies.closest_snapshot_year - companies.founding_year) <= 2
+        return companies
+
     def read_crunchbase():
-        companies = pd.read_stata("../../Data/Crunchbase/crunchbase_orgs.dta")
+        companies = pd.read_stata("../../Data/Crunchbase/crunchbase_orgs.dta")       
+        
+        if not "closest_snapshot_time" in companies.columns:
+            companies = data_reader.add_closest_snapshot(companies)
+
         return companies
 
     
