@@ -1,11 +1,23 @@
 # Measuring Founding Strategy
 
 
-Code used for Guzman and Li paper "Measuring Founding Strategy" 
+This repo is the main replication website for the paper "Measuring Founding Strategy", by Jorge Guzman and Aishen Li. This paper used the Python Doc2Vec library and the Wayback Machine to measure the differentation between startups and incumbents at the time of founding. The repo is split into four folders. 
+
+- *crawler/* is the code for crawling the Wayback Machine.
+- *download/* are scripts to activate the crawler and download all files.
+- *text_analysis/* estimates similarity across firms using doc2vec.
+- *utils/* is a series of programs to run the text analysis. 
+
+The repo focuses on the Python code to build the dataset.
+
+The underlying data, trained doc2vec models, and the Stata code replicating the regressions of the paper wlll be available in the Harvard Dataverse (link to be posted here).
 
 
-Authors
+# Authors
 
   Jorge Guzman. Assistant Professor, Columbia Business School. Email: jag2367@gsb.columbia.edu
   
-  Aishen Li. Doctoral Student. University of Michigan. 
+  Aishen Li. Doctoral Student. Tsinghua University.  Email: las21@mails.tsinghua.edu.cn
+  
+  
+  
