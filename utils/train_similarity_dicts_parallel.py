@@ -19,7 +19,7 @@ from HP_industries_estimator import HP_industries_estimator
 def train_website_novelty_scores(restimate_only, train, year):
 
     print("\n\n"+"*"*50)
-    print("***  \tStarting year {0} ".format(year))
+    print("***  \tStarting year {0} ".format(year), flush=True)
     print("*"*50+ "\n\n")
     
     estimator = similarity_estimator()
@@ -64,11 +64,15 @@ def train_website_novelty_scores(restimate_only, train, year):
 
 
 # Set to False to do the whole process again
-restimate_only = False
 
-if len(sys.argv) > 0:
+
+if len(sys.argv) > 1 and sys.argv[1] != "undefined":
     year = int(sys.argv[1])
 else:
     year = 2003
+
+
+    
+print("starting at year {0}".format(year), flush=True)
 
 train_website_novelty_scores(restimate_only = False, train= True, year = year)

@@ -1,4 +1,4 @@
-
+import traceback
 from gensim.parsing.preprocessing import remove_stopwords, preprocess_string, preprocess_documents
 from sklearn.metrics.pairwise import linear_kernel
 import nltk
@@ -12,6 +12,14 @@ import numpy as np
 from sklearn.cluster import KMeans
 from gensim.models import Word2Vec 
 from gensim.models.doc2vec import Doc2Vec , TaggedDocument
+from sklearn.metrics.pairwise import cosine_similarity
+from website_text_dataset import website_text_dataset
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+from sklearn.decomposition import PCA
+from sklearn.metrics.pairwise import euclidean_distances
+from langdetect import detect
+
 
 class similarity_estimator:
 
@@ -22,42 +30,10 @@ class similarity_estimator:
         pass
         
 
-
     def load_train(self, website_df):
-        websites = []
-        
-        website_list= []
-
-        print("Loading all websites. Total: {0}".format(website_df.shape[0]))
-        counter  = 0
-        counter_good = 0
-        for index , row in website_df.iterrows():
-            counter += 1
-            doc = website_text(row['path'], row['website'] , row['year'], row['incyear'])
-
-            if doc is not None and doc.is_valid_website():
-                counter_good += 1
-                websites.append(doc)
-
-                website_info = {}
-                website_info['website'] = row['website']
-                website_info['text_len'] = len(doc.get_website_text())
-                website_info['source'] = row['source']
-
-                text = doc.get_website_text()
-                text = text[1:5000] if len(text) > 5000 else text
-                website_info['text'] = text
-            
-                website_info['type'] = row['type']
-                website_list.append(website_info)
-
-            if (counter % 10) == 0:
-                print("\t.. {0} ({1})".format(counter, counter_good))
-
-        self.website_info = pd.DataFrame(website_list)    
+        (website_info, websites) = website_text_dataset.setup_website_text_df(website_df)
+        self.website_info = website_info
         self.websites = websites
-        print("\t Done")
-        
         
 
     def prepare_train_documents(self):
@@ -80,45 +56,117 @@ class similarity_estimator:
 
 
 
-    def get_row_similarities(self, sim, row, i, prefix = ""):
 
+
+    
+
+    def estimate_w2v_cosine_similarity(self):
+        #this section follows this guide: https://towardsdatascience.com/calculating-document-similarities-using-bert-and-other-models-b2c1a29c9630
+
+        print("\t.Estimating Word2Vec Similarity", flush=True)
+        
+        tokenized_len = 1000
+        tokenizer = Tokenizer()
+        tokenizer.fit_on_texts(self.train_documents)
+        tokenized_documents=tokenizer.texts_to_sequences(self.train_documents)
+        tokenized_paded_documents=pad_sequences(tokenized_documents,maxlen=tokenized_len,padding='post')
+        vocab_size=len(tokenizer.word_index)+1
+
+
+        tfidfvectoriser=TfidfVectorizer()
+        tfidfvectoriser.fit(self.train_documents)
+        tfidf_vectors=tfidfvectoriser.transform(self.train_documents)
+        words = tfidfvectoriser.get_feature_names()
+
+        
+        embedding_vector_len = self.word2vec_model.wv.vectors.shape[1]
+
+        # creating embedding matrix, every row is a vector representation from the vocabulary indexed by the tokenizer index. 
+        embedding_matrix=np.zeros((vocab_size,embedding_vector_len))
+        for word,i in tokenizer.word_index.items():
+            if word in self.word2vec_model.wv:
+                embedding_matrix[i]=self.word2vec_model.wv[word]
+
+
+        
+        total_docs = len(self.documents)
+        #mat = self.word2vec_model.wv.get_normed_vectors()
+        #w2v_sim = cosine_similarity(mat,mat)
+        document_word_embeddings = np.zeros( (total_docs, tokenized_len, embedding_vector_len))
+        for i in range(total_docs):            
+            for j in range(tokenized_len):
+                try:
+                    token_ij = tokenized_paded_documents[i,j]
+                    if token_ij > 0:
+                        word = tokenizer.index_word[token_ij]
+                        document_word_embeddings[i,j]+=embedding_matrix[token_ij]*tfidf_vectors[i,j]
+                except KeyError as e:
+                    traceback.print_exc()
+                    print(i)
+                    print(j)
+                    pdb.set_trace()
+
+        print("Matrix of embeddings created at word level")
+                    
+        w2v_sim =cosine_similarity(document_word_embeddings[0])
+        return w2v_sim_
+        
+
+
+    
+    def estimate_doc2vec_similarity(self):
+        mat = self.word2vec_model.docvecs.get_normed_vectors()
+        w2v_sim = np.dot(mat, mat.T)
+
+        return w2v_sim
+ 
+    
+    def estimate_allbutthetop_similarity(self):
+        #Includes the all but the top post-processing steps.
+        #https://openreview.net/pdf?id=HkuGJ3kCb
+        orig_mat = self.word2vec_model.docvecs.get_normed_vectors()
+        mat = np.subtract(orig_mat,np.mean(orig_mat,axis=0))
+        abt_sim = cosine_similarity(mat)
+        return abt_sim
+
+
+    def estimate_doc2vec_euclidean_dist(self):
+
+        mat = self.word2vec_model.docvecs.get_normed_vectors()
+        ecl_sim = euclidean_distances(mat, mat)
+        return ecl_sim
+
+
+
+    
+
+
+    
+    def get_row_similarities(self, sim, prefix, i):
         try:
             pdrow = {}
-            pdrow[prefix+'sim_1'] = row[-1]
-            pdrow[prefix+'sim_3'] = np.average(row[-3:])
-            pdrow[prefix+'sim_5'] = np.average(row[-5:])
+             
+            ### Similarity to Startups
+            startups_index = website_text_dataset.get_valid_startups_index(self.website_info)
+            self_index= website_text_dataset.get_self_index(self.website_info, i)
+            matches = np.all([startups_index,~self_index], axis=0)
             
-
-            startups_index = np.all(self.website_info.type == "startup",
-                                    self.website_info.snapshot_in_window == True,
-                                    axis=0)
-
-            self_index= np.all(self.website_info.website == self.website_info.website[i],
-                               self.website_info.type == "startup",
-                               axis=0)
-            
-            matches = np.all(startups_index,~self_index, axis=0)
-            
-            srow = sim[i][matches]
+            srow = sim[i][np.where(matches)]
             srow = np.sort(srow)        
-            srow = srow[~(srow > .95)]
             pdrow[prefix+'sim_startup_1'] = srow[-1]
             pdrow[prefix+'sim_startup_3'] = np.average(srow[-3:])
             pdrow[prefix+'sim_startup_5'] = np.average(srow[-5:])
             
             pdrow[prefix+'sim_startup_median'] = np.median(srow)
             pdrow[prefix+'hp_startup_firm_5'] =  np.average(srow[-5:]) - pdrow[prefix+'sim_startup_median']
-            pdrow[prefix+'hp_num_startups_in_industry'] =  np.sum(srow > .23)
-        
 
-            
-            public_firms_index = self.website_info.type == "public_firm"            
-            self_index= np.all(self.website_info.website == self.website_info.website[i],
-                               self.website_info.type == "public_firm", ##not common, but in case it's an IPO in the same year
-                               axis=0)
-            matches = np.all(public_firms_index, ~self_index, axis=0)
 
-            prow = sim[i][matches]
+            ### Similarity to public firms
+            public_firms_index = website_text_dataset.get_valid_public_firms_index(self.website_info) 
+            self_index= website_text_dataset.get_self_index(self.website_info, i, firmtype="public_firm")
+            matches = np.all([public_firms_index, ~self_index], axis=0)
+
+            prow = sim[i][np.where(matches)]
             prow = np.sort(prow)        
             pdrow[prefix+'sim_public_firm_1'] = prow[-1]
             pdrow[prefix+'sim_public_firm_3'] = np.average(prow[-3:])
@@ -126,9 +174,10 @@ class similarity_estimator:
 
             pdrow[prefix+'sim_public_median'] = np.median(prow)
             pdrow[prefix+'hp_public_firm_5'] =  np.average(prow[-5:]) -  pdrow[prefix+'sim_public_median'] 
-            
-            pdrow[prefix+'hp_num_public_in_industry'] =  np.sum(prow > .23)
 
+
+
+            
         except IndexError:
             import sys , traceback
             sys.exc_info()[0]
@@ -136,115 +185,116 @@ class similarity_estimator:
             pdb.set_trace()
         return pdrow
 
+    
+    def create_estimate_row(self, similarities,prefixes, index, debug_data = False):
+        pdrow = {}        
+        pdrow['website_name'] = self.website_info.iloc[index,0]
+        pdrow['website_len'] = self.website_info.iloc[index,1]
 
-
-    def create_estimate_row(self, sim, w2v_sim, i, debug_data = False):
-        row = sim[i]
-        row = np.sort(row)
-        #Keep only similarities below 0.95
-        row = row[~(row > .95)]
-            
-        pdrow = {}
-        
-        pdrow['website_name'] = self.website_info.iloc[i,0]
-        pdrow['website_len'] = self.website_info.iloc[i,1]
-        pdrow.update(self.get_row_similarities(sim,row,i))
-
-
-        ######### Word2Vec piece
-        row = w2v_sim[i]
-        row = np.sort(row)
-        row = row[~(row > .95)]
-        pdrow.update(self.get_row_similarities(w2v_sim, row,i, prefix="w2v_"))
-
+        for j in range(len(similarities)):            
+            pdrow.update(self.get_row_similarities(similarities[j], prefix=prefixes[j],i=index))
 
         return(pdrow)
     
 
-            
 
+
+
+    # next frontier is to include the following info
+    #                       https://openreview.net/pdf?id=HkuGJ3kCb
+    
     def estimate_similarities(self, debug_data = False):
+      
+        self.website_info = website_text_dataset.prep(self.website_info)
         print("\t.Estimating linear kernel similarity")
-        sim = linear_kernel(self.tfidf_model, self.tfidf_model)
+        tfidf_sim = linear_kernel(self.tfidf_model, self.tfidf_model)
         print("\t.Done")
 
-        print("\t.Initializing Word2Vec Matrices")
-        self.word2vec_model.init_sims()
-        print("\t.Estimating Word2Vec Similarity")
-        mat = self.word2vec_model.docvecs.doctag_syn0norm
-        w2v_sim = np.dot(mat, mat.T)
-        print("\t.Done")
+        w2v_sim = self.estimate_doc2vec_similarity()
+        abt_sim = self.estimate_allbutthetop_similarity()
+        ecl_sim = self.estimate_doc2vec_euclidean_dist()*-1 #make negative so it still all works as similarity
         rows_list = []
 
-        print("Getting similarities")
-        for i in np.where(self.website_info.type == "startup")[0]:
+        startup_ids = np.where(self.website_info.type == "startup")[0]
+        print("Getting similarities. Total: {0}".format(len(startup_ids)))
+        for i in startup_ids:
         #        for i in range(0,sim.shape[1]):
             if (i%25) == 0:
                 print("{0} ".format(i),end='', flush=True)
 
-            pdrow = self.create_estimate_row( sim, w2v_sim, i)
+            pdrow = self.create_estimate_row( similarities=[tfidf_sim, w2v_sim, abt_sim, ecl_sim],
+                                              prefixes = ['tfidf_','w2v_','abt_','ecl_'],
+                                              index = i)
             rows_list.append(pdrow)
 
         self.similarity_scores = pd.DataFrame(rows_list)
         self.w2v_sim_matrix = w2v_sim
+        self.abt_sim_matrix = abt_sim
         print("")
 
 
 
-    
-    def get_most_similar_firms(self):
 
-        if(self.w2v_sim_matrix is None):
+    
+    def get_most_similar_firms(self,verbose=True, debug=False):
+                
+        self.website_info = website_text_dataset.prep(self.website_info)
+        
+        if(self.abt_sim_matrix is None):
             print("ERROR: get_most_similar_firms can only be run after estimate_similarities")
             return (None)
-
-        public_firms_index = self.website_info.type == "public_firm"            
-        startups_index = np.all(self.website_info.type == "startup",
-                                self.website_info.snapshot_in_window == True,
-                                axis=0)
+        public_firms_index = website_text_dataset.get_valid_public_firms_index(self.website_info)       
+        startups_index = website_text_dataset.get_valid_startups_index(self.website_info)
 
         similar_firms = pd.DataFrame()
-
-
         print("Adding similar firms into a dataset")
-        
-        for i in startups_index:
+         
+        for i in np.where(startups_index)[0]:
             if (i % 25) == 0:
                 print("{0}/{1} ".format(i, similar_firms.shape[0]),end='', flush=True)
 
-
             ### Top Public Firms Matched
-            self_index= np.all(self.website_info.website == self.website_info.website[i],
-                               self.website_info.type == "public_firm",
+            self_index= np.all([self.website_info.website == self.website_info.website[i],
+                                self.website_info.type == "public_firm"],
                                axis=0)
-            
-            matches = np.all(public_firms_index, ~self_index, axis=0)
-
+            matches = np.all([public_firms_index, ~self_index], axis=0)
             public_firms = self.website_info.loc[matches].copy()
-            public_firms['sim'] =self.w2v_sim_matrix[i][matches]
-            public_firms = public_firms.loc[public_firms.sim < .95]
-            public_firms['matched_website'] = self.website_info.website[i]
+            public_firms['sim'] =self.abt_sim_matrix[i][matches]
 
+            focal_website = self.website_info.iloc[i]
+            public_firms['focal_website'] = focal_website.website
+            public_firms['focal_website_text'] = focal_website.text
+            public_firms['focal_website_snapshot_in_window'] = focal_website.snapshot_in_window
+            
             public_firms.sort_values(by='sim',ascending=False, inplace=True)
             similar_firms = similar_firms.append(public_firms.head(5))
 
+            if verbose:
+                print("\n\n ***************** {0} *********************\n\n".format(self.website_info.website[i]))
+                print("{0}  {1}".format(focal_website.website, focal_website.text[0:255]))
+                print("\n\n")
+                print(public_firms[['sim','text','website']].head(5))
+                
             
             ### Top Startups Matched
-            self_index= np.all(self.website_info.website == self.website_info.website[i],
-                               self.website_info.type == "startup",
-                               axis=0)
-            
-            matches = np.all(startups_index,~self_index)
+            self_index= np.all([self.website_info.website == self.website_info.website[i],
+                               self.website_info.type == "startup"],
+                               axis=0)            
+            matches = np.all([startups_index,~self_index], axis=0)
             startups = self.website_info.loc[matches].copy()
-            startups['sim'] =self.w2v_sim_matrix[i][matches]
-            startups = startups.loc[startups.sim < .95]
-            startups['matched_website'] = self.website_info.website[i]
+            startups['sim'] =self.abt_sim_matrix[i][matches]
+
+            startups['focal_website'] = focal_website.website
+            startups['focal_website_text'] = focal_website.text
+            startups['focal_website_snapshot_in_window'] = focal_website.snapshot_in_window           
             startups.sort_values(by='sim',ascending=False, inplace=True)
             
             similar_firms = similar_firms.append(startups.head(5))
 
+            if verbose:
+                print(startups[['sim','text','website']].head(5))
+
             
-        #pdb.set_trace()
         return(similar_firms)
 
 
@@ -276,9 +326,9 @@ class similarity_estimator:
         if self.train_documents is None:
             self.prepare_train_documents()
 
-        print("\t. Estimating Word2Vec model")            
+        print("\t. Estimating Word2Vec model", flush=True)
         
-        print("\t. Loading training documents")
+        print("\t. Loading training documents", flush=True)
 
         counter = 0
         all_docs = []
@@ -298,10 +348,20 @@ class similarity_estimator:
         documents = [TaggedDocument(doc, [i]) for i, doc in enumerate(all_docs)]    
 
         print("\t. Run model")
-        model = Doc2Vec(documents = documents)
+        model = Doc2Vec(documents = documents,
+                        vector_size=700,
+                        window=7,
+                        min_count =3)
         print("\t. Done")
         self.word2vec_model = model
-    
+        self.documents = all_docs
+
+        vec = TfidfVectorizer()
+        model = vec.fit(self.train_documents)
+        self.idf_weights = dict(zip(model.get_feature_names(), model.idf_))
+        
+
+            
 
 
 

@@ -11,7 +11,9 @@ from sklearn.cluster import KMeans
 from gensim.models import Word2Vec 
 from gensim.models.doc2vec import Doc2Vec , TaggedDocument
 import nltk
- 
+from website_text_dataset import website_text_dataset
+
+
 class HP_industries_estimator:
 
     def __init__(self):
@@ -73,7 +75,11 @@ class HP_industries_estimator:
         documents = [TaggedDocument(doc, [i]) for i, doc in enumerate(all_docs)]    
 
         print("\t. Run model")
-        model = Doc2Vec(documents = documents)
+        model = Doc2Vec(documents = documents,
+                        vector_size=700,
+                        window=7,
+                        min_count =3)
+        print()
         print("\t. Done")
         self.word2vec_model = model
     
@@ -97,7 +103,9 @@ class HP_industries_estimator:
 
 
     def estimate_industries(self):
-        ### TF IDF HP Industries: The approach by HP
+        self.website_info = website_text_dataset.prep(self.website_info)
+
+        ### TF IDF HP Industrioes: The approach by HP
         print("\t.Estimating linear kernel similarity")
         sim = linear_kernel(self.tfidf_model, self.tfidf_model)
         print("\t.Done")
@@ -111,21 +119,7 @@ class HP_industries_estimator:
         self.website_info["hp_industry"] =  hp_industries
 
 
-        ### Word2Vec HP Industries: The approach by HP but using w2v similarity
-        print("\t.Initializing Word2Vec Matrices")
-        self.word2vec_model.init_sims()
-        print("\t.Estimating Word2Vec Similarity")
-        mat = self.word2vec_model.docvecs.doctag_syn0norm
-        w2v_sim = np.dot(mat, mat.T)
-        kmeans = KMeans(n_clusters = 300 , random_state = 12345).fit(w2v_sim)
-        print("\t.Done")
-
         
-        hp_industries =  kmeans.labels_
-        print("\t. Updating website info")
-        self.website_info["w2v_hp_industry"] =  hp_industries
-        
-            
 
 
 
@@ -143,38 +137,7 @@ class HP_industries_estimator:
 
 
     def load_train(self, website_df):
-        websites = []
-        
-        website_list= []
-
-        print("Loading all websites. Total: {0}".format(website_df.shape[0]))
-        counter  = 0
-        counter_good = 0
-        for index , row in website_df.iterrows():
-            counter += 1
-            doc = website_text(row['path'], row['website'] , row['year'], row['incyear'], skip_memory_error=True)
-
-            if doc is not None and doc.is_valid_website():
-                counter_good += 1
-                websites.append(doc)
-
-                website_info = {}
-                website_info['website'] = row['website']
-                website_info['text_len'] = len(doc.get_website_text())
-                website_info['source'] = row['source']
-
-                text = doc.get_website_text()
-                text = text[1:600] if len(text) > 600 else text
-                website_info['text'] = text
-
-                website_info['type'] = row['type']                                
-                website_list.append(website_info)
-
-            if (counter % 10) == 0:
-                print("\t.. {0} ({1})".format(counter, counter_good))
-
-        self.website_info = pd.DataFrame(website_list)    
+        (website_info, websites) = website_text_dataset.setup_website_text_df(website_df)
+        self.website_info = website_info
         self.websites = websites
-        print("\t Done")
-        
 

@@ -92,6 +92,6 @@ def train_HP_industries(restimate_only = False):
     estimator.store_model("../../tfidf/hp_industries")
 
 ############# Main ################
-#train_HP_industries(restimate_only = False)
+train_HP_industries(restimate_only = False)
 
-train_website_novelty_scores(restimate_only = False, train= True, start_year = 2003)
+#train_website_novelty_scores(restimate_only = False, train= True, start_year = 2003)
