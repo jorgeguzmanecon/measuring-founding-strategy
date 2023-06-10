@@ -10,7 +10,10 @@ This repo is the main replication website for the paper "Measuring Founding Stra
 
 The repo focuses on the Python code to build the dataset.
 
-The underlying data, trained doc2vec models, and the Stata code replicating the regressions of the paper wlll be available in the Harvard Dataverse (link to be posted here).
+The underlying data, trained doc2vec models, and the Stata code replicating the regressions of the paper are be available in the Harvard Dataverse.
+ 
+https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/NRYTAA
+
 
 
 # Authors
